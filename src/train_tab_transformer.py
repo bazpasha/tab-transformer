@@ -83,7 +83,10 @@ def main():
             device=device,
             report_frequency=args.report_frequency,
             dataset_task=dataset.dataset_task,
-            epochs=args.epochs or float("inf")
+            epochs=args.epochs or float("inf"),
+            n_classes=dataset.n_classes,
+            targets_std=dataset.target_std,
+            verbose=args.verbose,
         )
 
         shutil.move(trainer.experiment_path, args.output_dir)
