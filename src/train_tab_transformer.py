@@ -13,6 +13,7 @@ from qhoptim.pyt import QHAdam
 from trainer import Trainer, train, get_default_optimizer_params
 from data import get_dataset
 from model import TabTransformer
+from utils import get_attention_function
 
 
 def get_args():
@@ -22,6 +23,7 @@ def get_args():
     parser.add_argument("--n-tokens", type=int, nargs="+", required=True, help="Number of tokens")
     parser.add_argument("--n-transformers", type=int, nargs="+", required=True, help="Number of transformers")
     parser.add_argument("--d-model", type=int, nargs="+", required=True, help="Model dimensionality")
+    parser.add_argument("--attention-function", type=str, nargs="+", required=True, help="Attention function")
     parser.add_argument("--model-seed", type=int, default=0, help="Model training seed")
     parser.add_argument("--batch-size", type=int, default=1024, help="Train batch size")
     parser.add_argument("--report-frequency", type=int, default=100, help="Report and averaging frequency")
@@ -29,7 +31,7 @@ def get_args():
     parser.add_argument("--cuda", action="store_true", help="Use GPU if available")
     parser.add_argument("--standardize", action="store_true", help="Standardize target for regression")
     parser.add_argument("--epochs", type=int, help="Fixed number of epochs for debug")
-    parser.add_argument("--output-dir", type=str, required=True, help="Output directory with all the experiments")
+    parser.add_argument("--output-dir", type=str, help="Output directory with all the experiments")
     return parser.parse_args()
 
 
@@ -49,12 +51,18 @@ def main():
 
     time_suffix = '{}.{:0>2d}.{:0>2d}_{:0>2d}:{:0>2d}'.format(*time.gmtime()[:5])
 
-    for n_tokens, n_transformers, d_model in itertools.product(args.n_tokens, args.n_transformers, args.d_model):
-        torch.manual_seed(0)
-        random.seed(0)
-        np.random.seed(0)
+    for n_tokens, n_transformers, d_model, attention_function in \
+            itertools.product(args.n_tokens, args.n_transformers, args.d_model, args.attention_function):
 
-        experiment_name = "{}.{}.{}.{}_{}".format(args.dataset, n_tokens, n_transformers, d_model, time_suffix)
+        torch.manual_seed(args.model_seed)
+        random.seed(args.model_seed)
+        np.random.seed(args.model_seed)
+
+        experiment_name = "{}.{}.{}.{}.{}_{}".format(
+            args.dataset, n_tokens, n_transformers, d_model, attention_function, time_suffix
+        )
+
+        attention_kwargs = {"attention_function": get_attention_function(attention_function)}
 
         model = TabTransformer(
             n_features=dataset.n_features,
@@ -62,7 +70,8 @@ def main():
             d_model=d_model,
             n_transformers=n_transformers,
             dim_feedforward=2 * d_model,
-            dim_output=dataset.dim_output
+            dim_output=dataset.dim_output,
+            attention_kwargs=attention_kwargs,
         ).to(device)
 
         trainer = Trainer(
@@ -89,7 +98,8 @@ def main():
             verbose=args.verbose,
         )
 
-        shutil.move(trainer.experiment_path, args.output_dir)
+        if args.output_dir is not None:
+            shutil.move(trainer.experiment_path, args.output_dir)
 
 
 if __name__ == "__main__":

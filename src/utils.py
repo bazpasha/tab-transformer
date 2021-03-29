@@ -1,4 +1,7 @@
 import torch
+import torch.nn.functional as F
+
+from node.lib import sparsemax, entmax15
 
 
 def process_in_chunks(model, data, batch_size):
@@ -13,3 +16,13 @@ def process_in_chunks(model, data, batch_size):
         out[batch_ix] = model(data[batch_ix]).cpu().detach()
 
     return out
+
+
+def get_attention_function(name):
+    if name == "softmax":
+        return F.softmax
+    elif name == "sparsemax":
+        return sparsemax
+    elif name == "entmax":
+        return entmax15
+    raise ValueError("Unknown attention function %s" % name)

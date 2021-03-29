@@ -1,9 +1,11 @@
-import numpy as np
 from collections import namedtuple
+import numpy as np
 
 import node.lib
 
+
 DatasetInfo = namedtuple("DatasetInfo", ("data", "target_std", "n_classes", "dataset_task", "dim_output", "n_features"))
+
 
 def get_dataset_task(dataset):
     if dataset.dataset in ["YEAR", "MICROSOFT", "YAHOO"]:
@@ -13,13 +15,14 @@ def get_dataset_task(dataset):
     else:
         raise ValueError("Unknown dataset")
 
+
 def get_dataset(dataset, seed, standardize):
     data = node.lib.Dataset(
         dataset=dataset,
         random_state=seed,
         quantile_transform=True,
     )
-    
+
     dataset_task = get_dataset_task(data)
 
     std = 1
@@ -29,7 +32,7 @@ def get_dataset(dataset, seed, standardize):
         mu, std = data.y_train.mean(), data.y_train.std()
         normalize = lambda x: ((x - mu) / std).astype(np.float32)
         data.y_train, data.y_valid, data.y_test = map(normalize, [data.y_train, data.y_valid, data.y_test])
-    
+
     n_classes = None
     if dataset_task == "classification":
         n_classes = len(set(data.y_train))
