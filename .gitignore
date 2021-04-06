@@ -4,3 +4,4 @@ data/
 out/
 __pycache__
 *.py[cod]
+src/run_test.py

@@ -27,6 +27,7 @@ def get_args():
     parser.add_argument("--model-seed", type=int, default=0, help="Model training seed")
     parser.add_argument("--batch-size", type=int, default=1024, help="Train batch size")
     parser.add_argument("--report-frequency", type=int, default=100, help="Report and averaging frequency")
+    parser.add_argument("--n-heads", type=int, default=1, nargs="+", help="Number of heads in attention")
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--cuda", action="store_true", help="Use GPU if available")
     parser.add_argument("--standardize", action="store_true", help="Standardize target for regression")
@@ -51,18 +52,21 @@ def main():
 
     time_suffix = '{}.{:0>2d}.{:0>2d}_{:0>2d}:{:0>2d}'.format(*time.gmtime()[:5])
 
-    for n_tokens, n_transformers, d_model, attention_function in \
-            itertools.product(args.n_tokens, args.n_transformers, args.d_model, args.attention_function):
+    for n_tokens, n_transformers, d_model, attention_function, n_heads in \
+            itertools.product(args.n_tokens, args.n_transformers, args.d_model, args.attention_function, args.n_heads):
 
         torch.manual_seed(args.model_seed)
         random.seed(args.model_seed)
         np.random.seed(args.model_seed)
 
-        experiment_name = "{}.{}.{}.{}.{}_{}".format(
-            args.dataset, n_tokens, n_transformers, d_model, attention_function, time_suffix
+        experiment_name = "{}.{}.{}.{}.{}.{}_{}".format(
+            args.dataset, n_tokens, n_transformers, d_model, attention_function, n_heads, time_suffix
         )
 
-        attention_kwargs = {"attention_function": get_attention_function(attention_function)}
+        attention_kwargs = {
+            "attention_function": get_attention_function(attention_function),
+            "n_heads": n_heads,
+        }
 
         model = TabTransformer(
             n_features=dataset.n_features,
