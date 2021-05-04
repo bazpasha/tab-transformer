@@ -120,6 +120,7 @@ class TabTransformer(nn.Module):
         dim_feedforward=128,
         dim_output=1,
         attention_kwargs=None,
+        agg_attention_kwargs=None,
         transformer_kwargs=None,
     ):
         super().__init__()
@@ -131,7 +132,7 @@ class TabTransformer(nn.Module):
         self.linear_embeddings = nn.Parameter(data=torch.empty(1, n_features, d_model))
         self.const_embeddings = nn.Parameter(data=torch.empty(1, n_features, d_model))
 
-        self.tokenizer = Attention(d_model, n_fixed_queries=n_tokens, **attention_kwargs)
+        self.tokenizer = Attention(d_model, n_fixed_queries=n_tokens, **agg_attention_kwargs)
         transformer_list = [
             SparseTransformerEncoder(d_model, dim_feedforward, attention_kwargs, **transformer_kwargs)
             for _ in range(n_transformers)

@@ -23,6 +23,7 @@ def get_args():
     parser.add_argument("--n-tokens", type=int, nargs="+", required=True, help="Number of tokens")
     parser.add_argument("--n-transformers", type=int, nargs="+", required=True, help="Number of transformers")
     parser.add_argument("--d-model", type=int, nargs="+", required=True, help="Model dimensionality")
+    parser.add_argument("--agg-attention-function", type=str, nargs="+", required=True, help="Aggregate attention function")
     parser.add_argument("--attention-function", type=str, nargs="+", required=True, help="Attention function")
     parser.add_argument("--model-seed", type=int, default=0, help="Model training seed")
     parser.add_argument("--batch-size", type=int, default=1024, help="Train batch size")
@@ -51,17 +52,35 @@ def main():
     )
 
     time_suffix = '{}.{:0>2d}.{:0>2d}_{:0>2d}:{:0>2d}'.format(*time.gmtime()[:5])
+    search_space = itertools.product(
+        args.n_tokens,
+        args.n_transformers,
+        args.d_model,
+        args.attention_function,
+        args.agg_attention_function,
+        args.n_heads
+    )
 
-    for n_tokens, n_transformers, d_model, attention_function, n_heads in \
-            itertools.product(args.n_tokens, args.n_transformers, args.d_model, args.attention_function, args.n_heads):
-
+    for n_tokens, n_transformers, d_model, attention_function, agg_attention_function, n_heads in search_space:
         torch.manual_seed(args.model_seed)
         random.seed(args.model_seed)
         np.random.seed(args.model_seed)
 
-        experiment_name = "{}.{}.{}.{}.{}.{}_{}".format(
-            args.dataset, n_tokens, n_transformers, d_model, attention_function, n_heads, time_suffix
+        experiment_name = "{}.{}.{}.{}.{}-{}.{}_{}".format(
+            args.dataset,
+            n_tokens,
+            n_transformers,
+            d_model,
+            agg_attention_function,
+            attention_function,
+            n_heads,
+            time_suffix
         )
+
+        agg_attention_kwargs = {
+            "attention_function": get_attention_function(agg_attention_function),
+            "n_heads": n_heads,
+        }
 
         attention_kwargs = {
             "attention_function": get_attention_function(attention_function),
@@ -76,6 +95,7 @@ def main():
             dim_feedforward=2 * d_model,
             dim_output=dataset.dim_output,
             attention_kwargs=attention_kwargs,
+            agg_attention_kwargs=agg_attention_kwargs,
         ).to(device)
 
         trainer = Trainer(
