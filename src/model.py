@@ -27,7 +27,6 @@ def get_random_masks(n_tokens, n_transformers, n_active=5):
 def get_window_masks(n_tokens, n_transformers, window_size=5):
     x = torch.arange(n_tokens).unsqueeze(0)
     x = (x - window_size).T < x
-    print(x)
     x = (x & x.T).float()
     masks = torch.repeat_interleave(
         x.unsqueeze(0),
