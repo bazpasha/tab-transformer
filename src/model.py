@@ -6,6 +6,49 @@ import torch.nn.functional as F
 from torch.nn.init import constant_, normal_
 
 
+def get_random_masks(n_tokens, n_transformers, n_active=5):
+    assert 1 < n_active <= n_tokens
+    masks = torch.repeat_interleave(
+        torch.eye(n_tokens, dtype=torch.float32).unsqueeze(0),
+        repeats=n_transformers,
+        dim=0
+    )
+
+    for i in range(n_transformers):
+        for j in range(n_tokens):
+            additional_idxs = np.random.choice(n_tokens - 1, size=n_active - 1, replace=False)
+            additional_idxs[additional_idxs >= j] += 1
+            for k in additional_idxs:
+                masks[i][j][k] = 1
+
+    return masks.unsqueeze(1)
+
+
+def get_window_masks(n_tokens, n_transformers, window_size=5):
+    x = torch.arange(n_tokens).unsqueeze(0)
+    x = (x - window_size).T < x
+    print(x)
+    x = (x & x.T).float()
+    masks = torch.repeat_interleave(
+        x.unsqueeze(0),
+        repeats=n_transformers,
+        dim=0
+    )
+
+    return masks.unsqueeze(1)
+
+
+def get_tree_masks(n_tokens, n_transformers):
+    masks = torch.empty((n_transformers, n_tokens, n_tokens), dtype=torch.float32)
+    partitions = 2 ** (n_transformers - 1)
+    assert n_tokens % partitions == 0
+    for i in range(n_transformers):
+        blocks = [torch.ones(n_tokens // partitions, n_tokens // partitions)] * partitions
+        masks[i] = torch.block_diag(*blocks)
+        partitions //= 2
+    return masks.unsqueeze(1)
+
+
 class Attention(nn.Module):
     def __init__(self, d_model, attention_function=F.softmax, n_fixed_queries=None, n_heads=1):
         super().__init__()
@@ -82,7 +125,7 @@ class Attention(nn.Module):
 
 
 class SparseTransformerEncoder(nn.Module):
-    def __init__(self, d_model, dim_feedforward, attention_kwargs=None):
+    def __init__(self, d_model, dim_feedforward, mask=None, attention_kwargs=None):
         super().__init__()
 
         attention_kwargs = attention_kwargs or {}
@@ -94,13 +137,17 @@ class SparseTransformerEncoder(nn.Module):
             nn.ReLU(),
             nn.Linear(dim_feedforward, d_model)
         )
+        if mask is not None:
+            self.mask = nn.Parameter(mask, requires_grad=False)
+        else:
+            self.mask = None
 
         self._initialize()
 
     def forward(self, x):
         # x.shape = [batch, length, token_dim]
         x = self.input_norm(x)
-        x = self.middle_norm(self.self_attention(x) + x)
+        x = self.middle_norm(self.self_attention(x, mask=self.mask) + x)
         return self.ff(x) + x
 
     def _initialize(self):
@@ -122,6 +169,7 @@ class TabTransformer(nn.Module):
         attention_kwargs=None,
         agg_attention_kwargs=None,
         transformer_kwargs=None,
+        masks=None,
     ):
         super().__init__()
 
@@ -132,12 +180,24 @@ class TabTransformer(nn.Module):
         self.linear_embeddings = nn.Parameter(data=torch.empty(1, n_features, d_model))
         self.const_embeddings = nn.Parameter(data=torch.empty(1, n_features, d_model))
 
+        if masks is None:
+            masks = [None] * n_transformers
+        assert len(masks) == n_transformers
+
         self.tokenizer = Attention(d_model, n_fixed_queries=n_tokens, **agg_attention_kwargs)
-        transformer_list = [
-            SparseTransformerEncoder(d_model, dim_feedforward, attention_kwargs, **transformer_kwargs)
-            for _ in range(n_transformers)
-        ]
-        self.transformer = nn.Sequential(*transformer_list)
+
+        transformers_list = []
+        for i in range(n_transformers):
+            layer = SparseTransformerEncoder(
+                d_model,
+                dim_feedforward,
+                attention_kwargs=attention_kwargs,
+                mask=masks[i],
+                **transformer_kwargs
+            )
+            transformers_list.append(layer)
+
+        self.transformer = nn.Sequential(*transformers_list)
 
         self.norm = nn.LayerNorm(d_model)
         self.output = nn.Linear(d_model, dim_output)

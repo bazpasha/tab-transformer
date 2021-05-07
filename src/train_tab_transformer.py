@@ -12,7 +12,7 @@ from qhoptim.pyt import QHAdam
 
 from trainer import Trainer, train, get_default_optimizer_params
 from data import get_dataset
-from model import TabTransformer
+from model import TabTransformer, get_random_masks, get_tree_masks, get_window_masks
 from utils import get_attention_function
 
 
@@ -39,6 +39,7 @@ def get_args():
     parser.add_argument("--standardize", action="store_true", help="Standardize target for regression")
     parser.add_argument("--epochs", type=int, help="Fixed number of epochs for debug")
     parser.add_argument("--output-dir", type=str, help="Output directory with all the experiments")
+    parser.add_argument("--mask", type=str, nargs="+", help="Mask names")
     return parser.parse_args()
 
 
@@ -62,21 +63,23 @@ def main():
         args.n_transformers,
         args.d_model,
         args.attention_function,
-        args.n_heads
+        args.n_heads,
+        args.mask or [None]
     )
 
-    for n_tokens, n_transformers, d_model, attention_function, n_heads in search_space:
+    for n_tokens, n_transformers, d_model, attention_function, n_heads, mask in search_space:
         torch.manual_seed(args.model_seed)
         random.seed(args.model_seed)
         np.random.seed(args.model_seed)
 
-        experiment_name = "{}.{}.{}.{}.{}.{}_{}".format(
+        experiment_name = "{}.{}.{}.{}.{}.{}.{}_{}".format(
             args.dataset,
             n_tokens,
             n_transformers,
             d_model,
             attention_function,
             n_heads,
+            mask or "full",
             time_suffix
         )
 
@@ -92,6 +95,17 @@ def main():
             "n_heads": n_heads,
         }
 
+        masks = None
+        if mask is not None:
+            if mask == "random":
+                masks = get_random_masks(n_tokens, n_transformers, n_active=5)
+            elif mask == "window":
+                masks = get_window_masks(n_tokens, n_transformers, window_size=3)
+            elif mask == "tree":
+                masks = get_tree_masks(n_tokens, n_transformers)
+            else:
+                assert mask == "full"
+
         model = TabTransformer(
             n_features=dataset.n_features,
             n_tokens=n_tokens,
@@ -101,6 +115,7 @@ def main():
             dim_output=dataset.dim_output,
             attention_kwargs=attention_kwargs,
             agg_attention_kwargs=agg_attention_kwargs,
+            masks=masks,
         ).to(device)
 
         trainer = Trainer(
