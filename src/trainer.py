@@ -1,15 +1,22 @@
 import os
 import json
 import numpy as np
+import shutil
+import random
 from sklearn.metrics import roc_auc_score, log_loss
 
 import torch
 import torch.nn.functional as F
 
+from catboost import CatBoostRegressor, CatBoostClassifier
+
 import node.lib
 from node.lib import check_numpy, to_one_hot
 
-from utils import process_in_chunks
+from qhoptim.pyt import QHAdam
+
+from utils import process_in_chunks, get_attention_function
+from model import TabTransformer, get_random_masks, get_tree_masks, get_window_masks
 
 
 class Trainer(node.lib.Trainer):
@@ -155,9 +162,205 @@ def train(
     if verbose:
         print("Finished!\n")
 
+    return results
+
 
 def get_default_optimizer_params():
     return {
         "nus": (0.7, 1.0),
         "betas": (0.95, 0.998)
     }
+
+
+def parse_attention_functions(attention_function):
+    if ":" in attention_function:
+        return attention_function.split(":", 1)
+    return attention_function, attention_function
+
+
+def train_tab_transformer(
+    n_tokens,
+    n_transformers,
+    d_model,
+    attention_function,
+    n_heads,
+    dataset_name,
+    time_suffix,
+    dataset,
+    batch_size,
+    device,
+    report_frequency,
+    mask,
+    epochs=None,
+    output_dir=None,
+    model_seed=42,
+    verbose=True,
+):
+    torch.manual_seed(model_seed)
+    random.seed(model_seed)
+    np.random.seed(model_seed)
+
+    experiment_name = "{}.{}.{}.{}.{}.{}.{}_{}".format(
+        dataset_name,
+        n_tokens,
+        n_transformers,
+        d_model,
+        attention_function,
+        n_heads,
+        mask or "full",
+        time_suffix
+    )
+
+    agg_attention_function, attention_function = parse_attention_functions(attention_function)
+
+    agg_attention_kwargs = {
+        "attention_function": get_attention_function(agg_attention_function),
+        "n_heads": n_heads,
+    }
+
+    attention_kwargs = {
+        "attention_function": get_attention_function(attention_function),
+        "n_heads": n_heads,
+    }
+
+    masks = None
+    if mask is not None:
+        if mask == "random":
+            masks = get_random_masks(n_tokens, n_transformers, n_active=5)
+        elif mask == "window":
+            masks = get_window_masks(n_tokens, n_transformers, window_size=3)
+        elif mask == "tree":
+            masks = get_tree_masks(n_tokens, n_transformers)
+        else:
+            assert mask == "full"
+
+    model = TabTransformer(
+        n_features=dataset.n_features,
+        n_tokens=n_tokens,
+        d_model=d_model,
+        n_transformers=n_transformers,
+        dim_feedforward=2 * d_model,
+        dim_output=dataset.dim_output,
+        attention_kwargs=attention_kwargs,
+        agg_attention_kwargs=agg_attention_kwargs,
+        masks=masks,
+    ).to(device)
+
+    trainer = Trainer(
+        model=model,
+        loss_function=F.mse_loss if dataset.dataset_task == "regression" else F.cross_entropy,
+        experiment_name=experiment_name,
+        warm_start=False,
+        Optimizer=QHAdam,
+        optimizer_params=get_default_optimizer_params(),
+        verbose=verbose,
+        n_last_checkpoints=5
+    )
+
+    metrics = train(
+        trainer=trainer,
+        data=dataset.data,
+        batch_size=batch_size,
+        device=device,
+        report_frequency=report_frequency,
+        dataset_task=dataset.dataset_task,
+        epochs=epochs or float("inf"),
+        n_classes=dataset.n_classes,
+        targets_std=dataset.target_std,
+        verbose=verbose,
+    )
+
+    if output_dir is not None:
+        shutil.move(trainer.experiment_path, output_dir)
+
+    return metrics
+
+
+def train_catboost(
+    max_trees,
+    depth,
+    learning_rate,
+    l2_leaf_reg,
+    bagging_temperature,
+    leaf_estimation_iterations,
+    time_suffix,
+    dataset,
+    dataset_name,
+    device,
+    report_frequency,
+    output_dir=None,
+    model_seed=42,
+    verbose=True,
+):
+    experiment_name = "{}:{}:{:.2f}:{:.2f}:{:.2f}:{}_{}".format(
+        dataset_name,
+        max_trees,
+        learning_rate,
+        l2_leaf_reg,
+        bagging_temperature,
+        leaf_estimation_iterations,
+        time_suffix
+    )
+
+    if dataset.dataset_task == "regression":
+        estimator = CatBoostRegressor
+    elif dataset.dataset_task == "classification":
+        estimator = CatBoostClassifier
+    else:
+        raise ValueError("Unknown dataset task")
+
+    model = estimator(
+        iterations=max_trees,
+        learning_rate=learning_rate,
+        depth=depth,
+        l2_leaf_reg=l2_leaf_reg,
+        bagging_temperature=bagging_temperature,
+        leaf_estimation_iterations=leaf_estimation_iterations,
+        task_type=device,
+        random_seed=model_seed,
+    )
+
+    data = dataset.data
+    model.fit(
+        X=data.X_train,
+        y=data.y_train,
+        use_best_model=True,
+        eval_set=(data.X_valid, data.y_valid),
+        verbose=verbose,
+        metric_period=report_frequency,
+    )
+
+    results = {}
+    for name, (X, y) in {"test": (data.X_test, data.y_test), "valid": (data.X_valid, data.y_valid)}.items():
+        if dataset.dataset_task == "regression":
+            y_pred = model.predict(X)
+            results[name] = {
+                "mse": np.mean((y - y_pred) ** 2) * dataset.target_std ** 2,
+                "mae": np.mean(np.abs(y - y_pred)) * dataset.target_std,
+            }
+        elif dataset.dataset_task == "classification":
+            y_pred = model.predict_proba(X)
+            one_hot = np.zeros((y.shape[0], dataset.n_classes))
+            one_hot[np.arange(one_hot.shape[0]), y] = 1
+            results[name] = {
+                "clf-error": np.mean(np.argmax(y_pred, -1) != y),
+                "logloss": log_loss(one_hot, y_pred)
+            }
+            if dataset.n_classes == 2:
+                results[name]["auc-roc"] = roc_auc_score(one_hot, y_pred)
+
+    if output_dir is not None:
+        out_path = os.path.join(output_dir, experiment_name)
+        os.mkdir(out_path)
+
+        eval_path = os.path.join(out_path, "eval.json")
+        with open(eval_path, "w") as _out:
+            json.dump(results, _out)
+
+        model_path = os.path.join(out_path, "model.cb")
+        model.save_model(model_path)
+
+    if verbose:
+        print("Finished!")
+
+    return results
