@@ -21,6 +21,7 @@ def get_args():
     parser.add_argument("--standardize", action="store_true", help="Standardize target for regression")
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--output-dir", type=str, help="Output directory with all the experiments")
+    parser.add_argument("--skip-sweeps", type=int)
 
     return parser.parse_args()
 
@@ -35,6 +36,7 @@ def tune_catboost(
     model_seed,
     params_seed,
     verbose,
+    skip_sweeps=None,
 ):
     search_space = SearchSpace(parameters=[
         RangeParameter(name="learning_rate", parameter_type=ParameterType.FLOAT, lower=1e-5, upper=1.0, log_scale=True),
@@ -45,9 +47,11 @@ def tune_catboost(
     ])
 
     sobol = get_sobol(search_space=search_space, seed=params_seed)
-    sweeps = sobol.gen(n=n_sweeps)
+    sweeps = sobol.gen(n=n_sweeps).arms
+    if skip_sweeps is not None:
+        sweeps = sweeps[skip_sweeps:]
 
-    for sweep in sweeps.arms:
+    for sweep in sweeps:
         train_catboost(
             max_trees=2048,
             time_suffix=time_suffix,
@@ -89,4 +93,5 @@ if __name__ == "__main__":
             model_seed=args.model_seed,
             params_seed=args.params_seed,
             verbose=args.verbose,
+            skip_sweeps=args.skip_sweeps
         )
