@@ -6,12 +6,13 @@ import random
 from sklearn.metrics import roc_auc_score, log_loss
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 
 from catboost import CatBoostRegressor, CatBoostClassifier
 
 import node.lib
-from node.lib import check_numpy, to_one_hot
+from node.lib import check_numpy, to_one_hot, Lambda
 
 from qhoptim.pyt import QHAdam
 
@@ -281,27 +282,15 @@ def train_catboost(
     depth,
     learning_rate,
     l2_leaf_reg,
-    bagging_temperature,
     leaf_estimation_iterations,
-    time_suffix,
+    experiment_name,
     dataset,
-    dataset_name,
     device,
     report_frequency,
     output_dir=None,
     model_seed=42,
     verbose=True,
 ):
-    experiment_name = "{}:{}:{:.2f}:{:.2f}:{:.2f}:{}_{}".format(
-        dataset_name,
-        max_trees,
-        learning_rate,
-        l2_leaf_reg,
-        bagging_temperature,
-        leaf_estimation_iterations,
-        time_suffix
-    )
-
     if dataset.dataset_task == "regression":
         estimator = CatBoostRegressor
     elif dataset.dataset_task == "classification":
@@ -314,7 +303,6 @@ def train_catboost(
         learning_rate=learning_rate,
         depth=depth,
         l2_leaf_reg=l2_leaf_reg,
-        bagging_temperature=bagging_temperature,
         leaf_estimation_iterations=leaf_estimation_iterations,
         task_type=device,
         random_seed=model_seed,
@@ -360,7 +348,100 @@ def train_catboost(
         model_path = os.path.join(out_path, "model.cb")
         model.save_model(model_path)
 
+        params_path = os.path.join(out_path, "params.json")
+        params = dict(
+            learning_rate=learning_rate,
+            depth=depth,
+            l2_leaf_reg=l2_leaf_reg,
+            leaf_estimation_iterations=leaf_estimation_iterations,
+        )
+        with open(params_path, "w") as _out:
+            json.dump(params, _out)
+
     if verbose:
         print("Finished!")
 
     return results
+
+
+def train_fcn(
+    n_head_layers,
+    n_head_units,
+    n_tail_layers,
+    n_tail_units,
+    dropout,
+    learning_rate,
+    experiment_name,
+    dataset,
+    batch_size,
+    device,
+    report_frequency,
+    epochs=None,
+    output_dir=None,
+    model_seed=42,
+    verbose=True,
+):
+    torch.manual_seed(model_seed)
+    random.seed(model_seed)
+    np.random.seed(model_seed)
+
+    model = []
+    units = (
+        [dataset.data.X_train.shape[1]] +
+        [2 ** n_head_units] * n_head_layers +
+        [2 ** n_tail_units] * n_tail_layers
+    )
+    for i in range(1, len(units)):
+        model.extend([
+            nn.Linear(units[i - 1], units[i]),
+            nn.ReLU(),
+            nn.Dropout(dropout)
+        ])
+    model.extend([
+        nn.Linear(units[-1], dataset.dim_output),
+        Lambda(lambda x: x.squeeze(1))
+    ])
+    model = nn.Sequential(*model).to(device)
+
+    optimizer_params = get_default_optimizer_params()
+    optimizer_params["lr"] = learning_rate
+    trainer = Trainer(
+        model=model,
+        loss_function=F.mse_loss if dataset.dataset_task == "regression" else F.cross_entropy,
+        experiment_name=experiment_name,
+        warm_start=False,
+        Optimizer=QHAdam,
+        optimizer_params=optimizer_params,
+        verbose=verbose,
+        n_last_checkpoints=5
+    )
+
+    metrics = train(
+        trainer=trainer,
+        data=dataset.data,
+        batch_size=batch_size,
+        device=device,
+        report_frequency=report_frequency,
+        dataset_task=dataset.dataset_task,
+        epochs=epochs or float("inf"),
+        n_classes=dataset.n_classes,
+        targets_std=dataset.target_std,
+        verbose=verbose,
+    )
+
+    params_path = os.path.join(trainer.experiment_path, "params.json")
+    params = dict(
+        n_head_layers=n_head_layers,
+        n_head_units=n_head_units,
+        n_tail_layers=n_tail_layers,
+        n_tail_units=n_tail_units,
+        dropout=dropout,
+        learning_rate=learning_rate,
+    )
+    with open(params_path, "w") as _out:
+        json.dump(params, _out)
+
+    if output_dir is not None:
+        shutil.move(trainer.experiment_path, output_dir)
+
+    return metrics
