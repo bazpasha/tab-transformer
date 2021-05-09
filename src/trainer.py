@@ -10,7 +10,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from catboost import CatBoostRegressor, CatBoostClassifier
-import xgboost as xgb
 
 import node.lib
 from node.lib import check_numpy, to_one_hot, Lambda
