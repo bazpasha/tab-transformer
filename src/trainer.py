@@ -10,6 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from catboost import CatBoostRegressor, CatBoostClassifier
+import xgboost as xgb
 
 import node.lib
 from node.lib import check_numpy, to_one_hot, Lambda
@@ -306,6 +307,7 @@ def train_catboost(
         leaf_estimation_iterations=leaf_estimation_iterations,
         task_type=device,
         random_seed=model_seed,
+        eval_metric="RMSE" if dataset.dataset_task == "regression" else "Accuracy"
     )
 
     data = dataset.data

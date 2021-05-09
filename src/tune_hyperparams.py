@@ -17,7 +17,7 @@ def get_args():
     parser.add_argument("--model-seed", type=int, default=0, help="Model seed")
     parser.add_argument("--dataset-seed", type=int, default=1337, help="Dataset split and transform seed")
     parser.add_argument("--cuda", action="store_true", help="Use GPU if available")
-    parser.add_argument("--n-sweeps", type=int, default=20, help="Number of sweeps")
+    parser.add_argument("--n-sweeps", type=int, default=30, help="Number of sweeps")
     parser.add_argument("--standardize", action="store_true", help="Standardize target for regression")
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--output-dir", type=str, help="Output directory with all the experiments")
@@ -39,10 +39,11 @@ def tune_catboost(
     skip_sweeps=None,
 ):
     search_space = SearchSpace(parameters=[
-        RangeParameter(name="learning_rate", parameter_type=ParameterType.FLOAT, lower=1e-3, upper=1.0, log_scale=True),
+        RangeParameter(name="learning_rate", parameter_type=ParameterType.FLOAT, lower=1e-4, upper=1.0, log_scale=True),
         RangeParameter(name="l2_leaf_reg", parameter_type=ParameterType.FLOAT, lower=1, upper=10),
+        RangeParameter(name="bagging_temperature", parameter_type=ParameterType.FLOAT, lower=0, upper=1),
         RangeParameter(name="leaf_estimation_iterations", parameter_type=ParameterType.INT, lower=1, upper=10),
-        ChoiceParameter(name="depth", parameter_type=ParameterType.INT, values=[4, 6])
+        ChoiceParameter(name="depth", parameter_type=ParameterType.INT, values=[2, 4, 6, 8])
     ])
 
     sobol = get_sobol(search_space=search_space, seed=params_seed)
@@ -52,7 +53,7 @@ def tune_catboost(
 
     for i, sweep in enumerate(sweeps):
         train_catboost(
-            max_trees=2048,
+            max_trees=4096,
             experiment_name="%s_%d_%s" % (dataset_name, i, time_suffix),
             dataset=dataset,
             device="GPU" if use_gpu else "CPU",
