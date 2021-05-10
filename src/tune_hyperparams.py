@@ -1,9 +1,12 @@
 import argparse
 import time
 import torch
+from functools import partial
 
 from ax import ChoiceParameter, RangeParameter, ParameterType, SearchSpace, Models, OrderConstraint
 from ax.modelbridge.factory import get_sobol
+
+from hyperopt import hp, fmin, tpe
 
 from trainer import train_catboost, train_fcn
 from data import get_dataset
@@ -22,6 +25,7 @@ def get_args():
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--output-dir", type=str, help="Output directory with all the experiments")
     parser.add_argument("--skip-sweeps", type=int)
+    parser.add_argument("--sweeper", type=str, default="sobol", help="Sweeper algorithm")
 
     return parser.parse_args()
 
@@ -117,6 +121,25 @@ def tune_fcn(
         )
 
 
+class HpWrapper:
+    def __init__(self, training_function, monitor, dataset_name, time_suffix, **constant_params):
+        self.i = 0
+        self.training_function = training_function
+        self.monitor = monitor
+        self.constant_params = constant_params
+        self.dataset_name = dataset_name
+        self.time_suffix = time_suffix
+
+    def __call__(self, params):
+        result = self.training_function(
+            experiment_name="%s_%d_%s" % (self.dataset_name, self.i, self.time_suffix),
+            **self.constant_params,
+            **params
+        )["valid"][self.monitor]
+        self.i += 1
+        return result
+
+
 if __name__ == "__main__":
     args = get_args()
 
@@ -134,31 +157,59 @@ if __name__ == "__main__":
 
     time_suffix = '{}.{:0>2d}.{:0>2d}_{:0>2d}:{:0>2d}'.format(*time.gmtime()[:5])
 
-    if args.model_name == "catboost":
-        tune_catboost(
-            n_sweeps=args.n_sweeps,
-            time_suffix=time_suffix,
-            dataset_name=args.dataset,
-            dataset=dataset,
-            use_gpu=use_gpu,
-            output_dir=args.output_dir,
-            model_seed=args.model_seed,
-            params_seed=args.params_seed,
-            verbose=args.verbose,
-            skip_sweeps=args.skip_sweeps
-        )
-    elif args.model_name == "fcn":
-        tune_fcn(
-            n_sweeps=args.n_sweeps,
-            time_suffix=time_suffix,
-            dataset_name=args.dataset,
-            dataset=dataset,
-            use_gpu=use_gpu,
-            output_dir=args.output_dir,
-            model_seed=args.model_seed,
-            params_seed=args.params_seed,
-            verbose=args.verbose,
-            skip_sweeps=args.skip_sweeps
-        )
+    if args.sweeper == "sobol":
+        if args.model_name == "catboost":
+            tune_catboost(
+                n_sweeps=args.n_sweeps,
+                time_suffix=time_suffix,
+                dataset_name=args.dataset,
+                dataset=dataset,
+                use_gpu=use_gpu,
+                output_dir=args.output_dir,
+                model_seed=args.model_seed,
+                params_seed=args.params_seed,
+                verbose=args.verbose,
+                skip_sweeps=args.skip_sweeps
+            )
+        elif args.model_name == "fcn":
+            tune_fcn(
+                n_sweeps=args.n_sweeps,
+                time_suffix=time_suffix,
+                dataset_name=args.dataset,
+                dataset=dataset,
+                use_gpu=use_gpu,
+                output_dir=args.output_dir,
+                model_seed=args.model_seed,
+                params_seed=args.params_seed,
+                verbose=args.verbose,
+                skip_sweeps=args.skip_sweeps
+            )
+        else:
+            raise NotImplementedError
+    elif args.sweeper == "tpe":
+        if args.model_name == "catboost":
+            search_space = {
+                "learning_rate": hp.loguniform("learning_rate", low=-4, high=0),
+                "l2_leaf_reg": hp.quniform("l2_leaf_reg", low=1, high=10, q=1),
+                "bagging_temperature": hp.uniform("bagging_temperature", low=0, high=1),
+                "leaf_estimation_iterations": hp.quniform("leaf_estimation_iterations", low=1, high=10, q=1),
+                "random_strength": hp.quniform("random_strength", low=1, high=20, q=1),
+            }
+            objective = HpWrapper(
+                training_function=train_catboost,
+                monitor="clf-error" if dataset.dataset_task == "classification" else "mse",
+                dataset_name=args.dataset,
+                time_suffix=time_suffix,
+                dataset=dataset,
+                device="GPU" if use_gpu else "CPU",
+                output_dir=args.output_dir,
+                model_seed=args.model_seed,
+                verbose=args.verbose,
+                report_frequency=100,
+                max_trees=4096,
+            )
+            fmin(objective, search_space, algo=tpe.suggest, max_evals=args.n_sweeps)
+        else:
+            raise NotImplementedError
     else:
         raise NotImplementedError
