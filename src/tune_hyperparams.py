@@ -2,6 +2,7 @@ import argparse
 import time
 import torch
 from functools import partial
+import numpy as np
 
 from ax import ChoiceParameter, RangeParameter, ParameterType, SearchSpace, Models, OrderConstraint
 from ax.modelbridge.factory import get_sobol
@@ -189,7 +190,7 @@ if __name__ == "__main__":
     elif args.sweeper == "tpe":
         if args.model_name == "catboost":
             search_space = {
-                "learning_rate": hp.loguniform("learning_rate", low=-4, high=0),
+                "learning_rate": hp.loguniform("learning_rate", low=np.log(1e-4), high=0),
                 "l2_leaf_reg": hp.quniform("l2_leaf_reg", low=1, high=10, q=1),
                 "bagging_temperature": hp.uniform("bagging_temperature", low=0, high=1),
                 "leaf_estimation_iterations": hp.quniform("leaf_estimation_iterations", low=1, high=10, q=1),
