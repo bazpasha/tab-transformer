@@ -129,6 +129,7 @@ if __name__ == "__main__":
         dataset=args.dataset,
         standardize=args.standardize,
         seed=args.dataset_seed,
+        quantile_noise=1e-3 if args.model_name == "catboost" else 0
     )
 
     time_suffix = '{}.{:0>2d}.{:0>2d}_{:0>2d}:{:0>2d}'.format(*time.gmtime()[:5])
