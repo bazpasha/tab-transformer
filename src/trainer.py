@@ -354,7 +354,6 @@ def train_catboost(
         params_path = os.path.join(out_path, "params.json")
         params = dict(
             learning_rate=learning_rate,
-            depth=depth,
             l2_leaf_reg=l2_leaf_reg,
             leaf_estimation_iterations=leaf_estimation_iterations,
             random_strength=random_strength,
