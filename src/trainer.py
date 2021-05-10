@@ -279,10 +279,11 @@ def train_tab_transformer(
 
 def train_catboost(
     max_trees,
-    depth,
     learning_rate,
     l2_leaf_reg,
     leaf_estimation_iterations,
+    random_strength,
+    bagging_temperature,
     experiment_name,
     dataset,
     device,
@@ -301,9 +302,10 @@ def train_catboost(
     model = estimator(
         iterations=max_trees,
         learning_rate=learning_rate,
-        depth=depth,
         l2_leaf_reg=l2_leaf_reg,
         leaf_estimation_iterations=leaf_estimation_iterations,
+        random_strength=random_strength,
+        bagging_temperature=bagging_temperature,
         task_type=device,
         random_seed=model_seed,
         eval_metric="RMSE" if dataset.dataset_task == "regression" else "Accuracy"
@@ -355,6 +357,8 @@ def train_catboost(
             depth=depth,
             l2_leaf_reg=l2_leaf_reg,
             leaf_estimation_iterations=leaf_estimation_iterations,
+            random_strength=random_strength,
+            bagging_temperature=bagging_temperature,
         )
         with open(params_path, "w") as _out:
             json.dump(params, _out)

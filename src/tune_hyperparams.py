@@ -43,7 +43,7 @@ def tune_catboost(
         RangeParameter(name="l2_leaf_reg", parameter_type=ParameterType.FLOAT, lower=1, upper=10),
         RangeParameter(name="bagging_temperature", parameter_type=ParameterType.FLOAT, lower=0, upper=1),
         RangeParameter(name="leaf_estimation_iterations", parameter_type=ParameterType.INT, lower=1, upper=10),
-        ChoiceParameter(name="depth", parameter_type=ParameterType.INT, values=[2, 4, 6, 8])
+        RangeParameter(name="random_strength", parameter_type=ParameterType.INT, lower=1, upper=20),
     ])
 
     sobol = get_sobol(search_space=search_space, seed=params_seed)
