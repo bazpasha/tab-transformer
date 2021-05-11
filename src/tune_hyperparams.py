@@ -44,9 +44,9 @@ def tune_catboost(
     skip_sweeps=None,
 ):
     search_space = SearchSpace(parameters=[
-        RangeParameter(name="learning_rate", parameter_type=ParameterType.FLOAT, lower=1e-4, upper=1.0, log_scale=True),
-        RangeParameter(name="l2_leaf_reg", parameter_type=ParameterType.FLOAT, lower=1, upper=10),
-        RangeParameter(name="bagging_temperature", parameter_type=ParameterType.FLOAT, lower=0, upper=1),
+        RangeParameter(name="learning_rate", parameter_type=ParameterType.FLOAT, lower=np.exp(-5), upper=1.0, log_scale=True),
+        RangeParameter(name="l2_leaf_reg", parameter_type=ParameterType.FLOAT, lower=1, upper=10, log_scale=True),
+        RangeParameter(name="subsample", parameter_type=ParameterType.FLOAT, lower=0, upper=1),
         RangeParameter(name="leaf_estimation_iterations", parameter_type=ParameterType.INT, lower=1, upper=10),
         RangeParameter(name="random_strength", parameter_type=ParameterType.INT, lower=1, upper=20),
     ])
@@ -58,14 +58,14 @@ def tune_catboost(
 
     for i, sweep in enumerate(sweeps):
         train_catboost(
-            max_trees=4096,
+            max_trees=2048,
             experiment_name="%s_%d_%s" % (dataset_name, i, time_suffix),
             dataset=dataset,
             device="GPU" if use_gpu else "CPU",
-            report_frequency=100,
             output_dir=output_dir,
             model_seed=model_seed,
             verbose=verbose,
+            report_frequency=100,
             **sweep.parameters,
         )
 
@@ -191,8 +191,8 @@ if __name__ == "__main__":
         if args.model_name == "catboost":
             search_space = {
                 "learning_rate": hp.loguniform("learning_rate", low=np.log(1e-4), high=0),
-                "l2_leaf_reg": hp.quniform("l2_leaf_reg", low=1, high=10, q=1),
-                "bagging_temperature": hp.uniform("bagging_temperature", low=0, high=1),
+                "l2_leaf_reg": hp.loguniform("l2_leaf_reg", low=0, high=np.log(10)),
+                "subsample": hp.uniform("subsample", low=0, high=1),
                 "leaf_estimation_iterations": hp.quniform("leaf_estimation_iterations", low=1, high=10, q=1),
                 "random_strength": hp.quniform("random_strength", low=1, high=20, q=1),
             }
@@ -207,7 +207,7 @@ if __name__ == "__main__":
                 model_seed=args.model_seed,
                 verbose=args.verbose,
                 report_frequency=100,
-                max_trees=4096,
+                max_trees=2048,
             )
             fmin(objective, search_space, algo=tpe.suggest, max_evals=args.n_sweeps)
         else:

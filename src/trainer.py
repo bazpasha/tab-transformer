@@ -283,7 +283,7 @@ def train_catboost(
     l2_leaf_reg,
     leaf_estimation_iterations,
     random_strength,
-    bagging_temperature,
+    subsample,
     experiment_name,
     dataset,
     device,
@@ -305,18 +305,15 @@ def train_catboost(
         l2_leaf_reg=l2_leaf_reg,
         leaf_estimation_iterations=leaf_estimation_iterations,
         random_strength=random_strength,
-        bagging_temperature=bagging_temperature,
+        subsample=subsample,
         task_type=device,
         random_seed=model_seed,
-        eval_metric="RMSE" if dataset.dataset_task == "regression" else "Accuracy"
     )
 
     data = dataset.data
     model.fit(
         X=data.X_train,
         y=data.y_train,
-        use_best_model=True,
-        eval_set=(data.X_valid, data.y_valid),
         verbose=verbose,
         metric_period=report_frequency,
     )
@@ -357,7 +354,7 @@ def train_catboost(
             l2_leaf_reg=l2_leaf_reg,
             leaf_estimation_iterations=leaf_estimation_iterations,
             random_strength=random_strength,
-            bagging_temperature=bagging_temperature,
+            subsample=subsample,
         )
         with open(params_path, "w") as _out:
             json.dump(params, _out)
