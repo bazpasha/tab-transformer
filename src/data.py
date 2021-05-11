@@ -16,7 +16,7 @@ def get_dataset_task(dataset):
         raise ValueError("Unknown dataset")
 
 
-def get_dataset(dataset, seed, standardize, quantile_noise):
+def get_dataset(dataset, seed, standardize, quantile_noise=0):
     data = node.lib.Dataset(
         dataset=dataset,
         random_state=seed,
