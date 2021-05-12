@@ -134,7 +134,7 @@ def tune_tab_transformer(
     search_space = SearchSpace(
         parameters=[
             ChoiceParameter(name="d_model", parameter_type=ParameterType.INT, values=[64, 128]),
-            ChoiceParameter(name="n_tokens", parameter_type=ParameterType.INT, values=[16, 32]),
+            ChoiceParameter(name="n_tokens", parameter_type=ParameterType.INT, values=[8, 16]),
             ChoiceParameter(name="n_transformers", parameter_type=ParameterType.INT, values=[3, 5]),
             ChoiceParameter(name="dim_ff_factor", parameter_type=ParameterType.INT, values=[2, 4]),
             ChoiceParameter(name="dropout", parameter_type=ParameterType.FLOAT, values=[0.0, 0.1, 0.2, 0.3]),

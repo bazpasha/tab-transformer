@@ -262,22 +262,23 @@ def train_tab_transformer(
         verbose=verbose,
     )
 
+    params=dict(
+        n_tokens=n_tokens,
+        d_model=d_model,
+        n_transformers=n_transformers,
+        dim_ff_factor=dim_ff_factor,
+        mask=mask,
+        dropout=dropout,
+        attention_function=attention_function,
+        n_heads=n_heads,
+    )
+
+    params_path = os.path.join(trainer.experiment_path, "params.json")
+    with open(params_path, "w") as _out:
+        json.dump(params, _out)
+
     if output_dir is not None:
         shutil.move(trainer.experiment_path, output_dir)
-        params=dict(
-            n_tokens=n_tokens,
-            d_model=d_model,
-            n_transformers=n_transformers,
-            dim_ff_factor=dim_ff_factor,
-            mask=mask,
-            dropout=dropout,
-            attention_function=attention_function,
-            n_heads=n_heads,
-        )
-
-        params_path = os.path.join(output_dir, "params.json")
-        with open(params_path, "w") as _out:
-            json.dump(params, _out)
 
     return metrics
 
