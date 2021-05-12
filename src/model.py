@@ -39,12 +39,13 @@ def get_window_masks(n_tokens, n_transformers, window_size=5):
 
 def get_tree_masks(n_tokens, n_transformers):
     masks = torch.empty((n_transformers, n_tokens, n_tokens), dtype=torch.float32)
-    partitions = 2 ** (n_transformers - 1)
-    assert n_tokens % partitions == 0
+    partitions = min(n_tokens // 2, 2 ** (n_transformers - 1))
     for i in range(n_transformers):
+        assert n_tokens % partitions == 0, "not a power of 2"
         blocks = [torch.ones(n_tokens // partitions, n_tokens // partitions)] * partitions
         masks[i] = torch.block_diag(*blocks)
-        partitions //= 2
+        if partitions > 1:
+            partitions //= 2
     return masks.unsqueeze(1)
 
 
@@ -124,7 +125,7 @@ class Attention(nn.Module):
 
 
 class SparseTransformerEncoder(nn.Module):
-    def __init__(self, d_model, dim_feedforward, mask=None, attention_kwargs=None):
+    def __init__(self, d_model, dim_feedforward, dropout=0, mask=None, attention_kwargs=None):
         super().__init__()
 
         attention_kwargs = attention_kwargs or {}
@@ -141,13 +142,17 @@ class SparseTransformerEncoder(nn.Module):
         else:
             self.mask = None
 
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+
         self._initialize()
 
     def forward(self, x):
         # x.shape = [batch, length, token_dim]
         x = self.input_norm(x)
-        x = self.middle_norm(self.self_attention(x, mask=self.mask) + x)
-        return self.ff(x) + x
+        attention = self.self_attention(x, mask=self.mask)
+        x = self.middle_norm(self.dropout1(attention) + x)
+        return self.dropout2(self.ff(x)) + x
 
     def _initialize(self):
         for layer in self.ff:
@@ -164,6 +169,7 @@ class TabTransformer(nn.Module):
         d_model=64,
         n_transformers=4,
         dim_feedforward=128,
+        dropout=0,
         dim_output=1,
         attention_kwargs=None,
         agg_attention_kwargs=None,
@@ -190,6 +196,7 @@ class TabTransformer(nn.Module):
             layer = SparseTransformerEncoder(
                 d_model,
                 dim_feedforward,
+                dropout=dropout,
                 attention_kwargs=attention_kwargs,
                 mask=masks[i],
                 **transformer_kwargs

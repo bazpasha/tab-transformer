@@ -185,13 +185,14 @@ def train_tab_transformer(
     d_model,
     attention_function,
     n_heads,
-    dataset_name,
-    time_suffix,
+    experiment_name,
     dataset,
     batch_size,
     device,
     report_frequency,
     mask,
+    dim_ff_factor=2,
+    dropout=0,
     epochs=None,
     output_dir=None,
     model_seed=42,
@@ -200,17 +201,6 @@ def train_tab_transformer(
     torch.manual_seed(model_seed)
     random.seed(model_seed)
     np.random.seed(model_seed)
-
-    experiment_name = "{}.{}.{}.{}.{}.{}.{}_{}".format(
-        dataset_name,
-        n_tokens,
-        n_transformers,
-        d_model,
-        attention_function,
-        n_heads,
-        mask or "full",
-        time_suffix
-    )
 
     agg_attention_function, attention_function = parse_attention_functions(attention_function)
 
@@ -240,11 +230,12 @@ def train_tab_transformer(
         n_tokens=n_tokens,
         d_model=d_model,
         n_transformers=n_transformers,
-        dim_feedforward=2 * d_model,
+        dim_feedforward=dim_ff_factor * d_model,
         dim_output=dataset.dim_output,
         attention_kwargs=attention_kwargs,
         agg_attention_kwargs=agg_attention_kwargs,
         masks=masks,
+        dropout=dropout,
     ).to(device)
 
     trainer = Trainer(
@@ -273,6 +264,20 @@ def train_tab_transformer(
 
     if output_dir is not None:
         shutil.move(trainer.experiment_path, output_dir)
+        params=dict(
+            n_tokens=n_tokens,
+            d_model=d_model,
+            n_transformers=n_transformers,
+            dim_ff_factor=dim_ff_factor,
+            mask=mask,
+            dropout=dropout,
+            attention_function=attention_function,
+            n_heads=n_heads,
+        )
+
+        params_path = os.path.join(output_dir, "params.json")
+        with open(params_path, "w") as _out:
+            json.dump(params, _out)
 
     return metrics
 
