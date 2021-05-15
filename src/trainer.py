@@ -21,6 +21,10 @@ from model import TabTransformer, get_random_masks, get_tree_masks, get_window_m
 
 
 class Trainer(node.lib.Trainer):
+    def __init__(self, *args, mask_fraction=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.mask_fraction = mask_fraction
+
     def evaluate_classification_error(self, X_test, y_test, device, batch_size=4096):
         X_test = torch.as_tensor(X_test, device=device)
         y_test = check_numpy(y_test)
@@ -73,6 +77,36 @@ class Trainer(node.lib.Trainer):
             logloss = log_loss(check_numpy(to_one_hot(y_test)), logits)
         return logloss
 
+    def pretrain_loss(self, X):
+        mask = (torch.rand_like(X) < self.mask_fraction).float()
+        mask_unk = (torch.rand_like(X) < 0.9).float()
+        pretrain_mask = (mask * mask_unk).unsqueeze(-1)
+        loss = (self.model(X, pretrain_mask=pretrain_mask) - X) ** 2
+        loss = (loss * mask).sum(dim=-1) / (mask.sum(dim=-1) + 1e-16)
+        return loss
+
+    def evaluate_pretrain(self, X_test, device, batch_size=512):
+        X_test = torch.as_tensor(X_test, device=device)
+        self.model.train(False)
+        with torch.no_grad():
+            loss = process_in_chunks(self.pretrain_loss, X_test, batch_size=batch_size).cpu().detach().numpy()
+        return float(loss.mean())
+
+    def pretrain_on_batch(self, *batch, device):
+        x_batch, y_batch = batch
+        x_batch = torch.as_tensor(x_batch, device=device)
+        y_batch = torch.as_tensor(y_batch, device=device)
+
+        self.model.train()
+        self.opt.zero_grad()
+        loss = self.pretrain_loss(x_batch).mean()
+        loss.backward()
+        self.opt.step()
+        self.step += 1
+        self.writer.add_scalar('train loss', loss.item(), self.step)
+
+        return {'loss': loss}
+
     def forward(self):
         raise NotImplementedError
 
@@ -88,21 +122,28 @@ def train(
     targets_std=1,
     n_classes=None,
     verbose=True,
-    epochs=float("inf")):
+    epochs=float("inf"),
+    pretrain=False
+):
 
     best_metric = float("inf")
     best_step_metric = 0
 
     for batch in node.lib.iterate_minibatches(data.X_train, data.y_train, batch_size=batch_size,
                                                 shuffle=True, epochs=epochs):
-        trainer.train_on_batch(*batch, device=device)
+        if pretrain:
+            trainer.pretrain_on_batch(*batch, device=device)
+        else:
+            trainer.train_on_batch(*batch, device=device)
 
         if trainer.step % report_frequency == 0:
             trainer.save_checkpoint()
             trainer.average_checkpoints(out_tag='avg')
             trainer.load_checkpoint(tag='avg')
 
-            if dataset_task == "regression":
+            if pretrain:
+                metric = trainer.evaluate_pretrain(data.X_valid, device, batch_size=1024)
+            elif dataset_task == "regression":
                 metric = trainer.evaluate_mse(data.X_valid, data.y_valid, device, batch_size=1024)
                 metric *= targets_std ** 2
             elif dataset_task == "classification":
@@ -134,7 +175,11 @@ def train(
     results = {}
     trainer.load_checkpoint(tag='best')
     for name, (X, y) in {"test": (data.X_test, data.y_test), "valid": (data.X_valid, data.y_valid)}.items():
-        if dataset_task == "regression":
+        if pretrain:
+            results[name] = {
+                "pretrain": trainer.evaluate_pretrain(X, device, batch_size=512)
+            }
+        elif dataset_task == "regression":
             results[name] = {
                 "mse": trainer.evaluate_mse(X, y, device, batch_size=512) * targets_std ** 2,
                 "mae": trainer.evaluate_mae(X, y, device, batch_size=512) * targets_std,
@@ -197,6 +242,8 @@ def train_tab_transformer(
     output_dir=None,
     model_seed=42,
     verbose=True,
+    pretrain=False,
+    mask_fraction=None
 ):
     torch.manual_seed(model_seed)
     random.seed(model_seed)
@@ -236,7 +283,37 @@ def train_tab_transformer(
         agg_attention_kwargs=agg_attention_kwargs,
         masks=masks,
         dropout=dropout,
+        with_pretrain_stage=pretrain
     ).to(device)
+
+    if pretrain:
+        trainer = Trainer(
+            model=model,
+            loss_function=None,
+            experiment_name="pretrain_" + experiment_name,
+            warm_start=False,
+            Optimizer=QHAdam,
+            optimizer_params=get_default_optimizer_params(),
+            verbose=verbose,
+            n_last_checkpoints=5,
+            mask_fraction=mask_fraction
+        )
+        trainer.model.pretrain_on()
+
+        train(
+            trainer=trainer,
+            data=dataset.data,
+            batch_size=batch_size,
+            device=device,
+            report_frequency=report_frequency,
+            dataset_task=dataset.dataset_task,
+            epochs=epochs or float("inf"),
+            n_classes=dataset.n_classes,
+            targets_std=dataset.target_std,
+            verbose=verbose,
+            pretrain=True,
+        )
+        trainer.model.pretrain_off()
 
     trainer = Trainer(
         model=model,

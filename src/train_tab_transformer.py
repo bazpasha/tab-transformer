@@ -10,7 +10,7 @@ import torch.nn.functional as F
 
 from qhoptim.pyt import QHAdam
 
-from trainer import Trainer, train, get_default_optimizer_params
+from trainer import Trainer, train, get_default_optimizer_params, train_tab_transformer
 from data import get_dataset
 from model import TabTransformer, get_random_masks, get_tree_masks, get_window_masks
 from utils import get_attention_function
@@ -40,6 +40,8 @@ def get_args():
     parser.add_argument("--epochs", type=int, help="Fixed number of epochs for debug")
     parser.add_argument("--output-dir", type=str, help="Output directory with all the experiments")
     parser.add_argument("--mask", type=str, nargs="+", help="Mask names")
+    parser.add_argument("--pretrain", action="store_true", help="Pretrain model")
+    parser.add_argument("--mask-fraction", type=float, default=0.1, help="Mask fraction for pretrain")
     return parser.parse_args()
 
 
@@ -68,10 +70,6 @@ def main():
     )
 
     for n_tokens, n_transformers, d_model, attention_function, n_heads, mask in search_space:
-        torch.manual_seed(args.model_seed)
-        random.seed(args.model_seed)
-        np.random.seed(args.model_seed)
-
         experiment_name = "{}.{}.{}.{}.{}.{}.{}_{}".format(
             args.dataset,
             n_tokens,
@@ -83,67 +81,25 @@ def main():
             time_suffix
         )
 
-        agg_attention_function, attention_function = parse_attention_functions(attention_function)
-
-        agg_attention_kwargs = {
-            "attention_function": get_attention_function(agg_attention_function),
-            "n_heads": n_heads,
-        }
-
-        attention_kwargs = {
-            "attention_function": get_attention_function(attention_function),
-            "n_heads": n_heads,
-        }
-
-        masks = None
-        if mask is not None:
-            if mask == "random":
-                masks = get_random_masks(n_tokens, n_transformers, n_active=5)
-            elif mask == "window":
-                masks = get_window_masks(n_tokens, n_transformers, window_size=3)
-            elif mask == "tree":
-                masks = get_tree_masks(n_tokens, n_transformers)
-            else:
-                assert mask == "full"
-
-        model = TabTransformer(
-            n_features=dataset.n_features,
+        train_tab_transformer(
             n_tokens=n_tokens,
-            d_model=d_model,
             n_transformers=n_transformers,
-            dim_feedforward=2 * d_model,
-            dim_output=dataset.dim_output,
-            attention_kwargs=attention_kwargs,
-            agg_attention_kwargs=agg_attention_kwargs,
-            masks=masks,
-        ).to(device)
-
-        trainer = Trainer(
-            model=model,
-            loss_function=F.mse_loss if dataset.dataset_task == "regression" else F.cross_entropy,
+            d_model=d_model,
+            attention_function=attention_function,
+            n_heads=n_heads,
             experiment_name=experiment_name,
-            warm_start=False,
-            Optimizer=QHAdam,
-            optimizer_params=get_default_optimizer_params(),
-            verbose=args.verbose,
-            n_last_checkpoints=5
-        )
-
-        train(
-            trainer=trainer,
-            data=dataset.data,
+            dataset=dataset,
             batch_size=args.batch_size,
             device=device,
             report_frequency=args.report_frequency,
-            dataset_task=dataset.dataset_task,
+            mask=mask,
             epochs=args.epochs or float("inf"),
-            n_classes=dataset.n_classes,
-            targets_std=dataset.target_std,
+            output_dir=args.output_dir,
+            model_seed=args.model_seed,
             verbose=args.verbose,
+            pretrain=args.pretrain,
+            mask_fraction=args.mask_fraction
         )
-
-        if args.output_dir is not None:
-            shutil.move(trainer.experiment_path, args.output_dir)
 
 
 if __name__ == "__main__":

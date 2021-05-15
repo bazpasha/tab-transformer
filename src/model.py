@@ -175,6 +175,7 @@ class TabTransformer(nn.Module):
         agg_attention_kwargs=None,
         transformer_kwargs=None,
         masks=None,
+        with_pretrain_stage=False,
     ):
         super().__init__()
 
@@ -207,14 +208,35 @@ class TabTransformer(nn.Module):
 
         self.norm = nn.LayerNorm(d_model)
         self.output = nn.Linear(d_model, dim_output)
+
+        self.with_pretrain_stage = with_pretrain_stage
+        if with_pretrain_stage:
+            self.unk_embedding = nn.Parameter(data=torch.empty(1, 1, d_model))
+            self.pretrain_attention = Attention(d_model, n_fixed_queries=n_features)
+            self.pretrain_activation = nn.ReLU()
+            self.pretrain_output = nn.Linear(d_model, 1)
+        self.pretrain = False
+
         self._initialize()
 
-    def forward(self, x):
+    def forward(self, x, pretrain_mask=None):
         n = x.size(0)
         x = x.unsqueeze(-1) * self.linear_embeddings + self.const_embeddings.expand(n, -1, -1)
+
+        if self.pretrain:
+            assert pretrain_mask is not None
+            x = (1 - pretrain_mask) * x + pretrain_mask * self.unk_embedding
+
         x = self.tokenizer(x)
         x = self.transformer(x)
-        x = self.norm(x).mean(dim=1)
+        x = self.norm(x)
+
+        if self.pretrain:
+            x = self.pretrain_attention(x)
+            x = self.pretrain_activation(x)
+            return self.pretrain_output(x).squeeze(-1)
+
+        x = x.mean(dim=1)
         return self.output(x).squeeze(1)
 
     def _initialize(self):
@@ -222,3 +244,16 @@ class TabTransformer(nn.Module):
         normal_(self.const_embeddings, std=0.1)
         normal_(self.output.weight, std=0.1)
         constant_(self.output.bias, val=0)
+
+        if self.with_pretrain_stage:
+            normal_(self.unk_embedding, std=0.1)
+            normal_(self.pretrain_output.weight, std=0.1)
+            constant_(self.pretrain_output.bias, val=0)
+
+    def pretrain_on(self):
+        assert self.with_pretrain_stage
+        self.pretrain = True
+
+    def pretrain_off(self):
+        assert self.with_pretrain_stage
+        self.pretrain = False
