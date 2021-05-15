@@ -243,7 +243,8 @@ def train_tab_transformer(
     model_seed=42,
     verbose=True,
     pretrain=False,
-    mask_fraction=None
+    mask_fraction=None,
+    n_to_freeze=None,
 ):
     torch.manual_seed(model_seed)
     random.seed(model_seed)
@@ -314,6 +315,9 @@ def train_tab_transformer(
             pretrain=True,
         )
         trainer.model.pretrain_off()
+
+        if n_to_freeze is not None:
+            trainer.model.freeze_transformers(n_to_freeze)
 
     trainer = Trainer(
         model=model,

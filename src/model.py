@@ -257,3 +257,13 @@ class TabTransformer(nn.Module):
     def pretrain_off(self):
         assert self.with_pretrain_stage
         self.pretrain = False
+
+    def freeze_transformers(self, n_to_freeze):
+        assert 0 <= n_to_freeze <= len(self.transformer)
+        self.linear_embeddings.requires_grad = False
+        self.const_embeddings.requires_grad = False
+        for parameter in self.tokenizer.parameters():
+            parameter.requires_grad = False
+        for i in range(n_to_freeze):
+            for parameter in self.transformer[i].parameters():
+                parameter.requires_grad = False

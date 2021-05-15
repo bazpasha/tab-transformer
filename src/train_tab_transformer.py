@@ -42,6 +42,7 @@ def get_args():
     parser.add_argument("--mask", type=str, nargs="+", help="Mask names")
     parser.add_argument("--pretrain", action="store_true", help="Pretrain model")
     parser.add_argument("--mask-fraction", type=float, default=0.1, help="Mask fraction for pretrain")
+    parser.add_argument("--n-to-freeze", type=int, help="How many transformer layers to freeze after pretrain")
     return parser.parse_args()
 
 
@@ -98,7 +99,8 @@ def main():
             model_seed=args.model_seed,
             verbose=args.verbose,
             pretrain=args.pretrain,
-            mask_fraction=args.mask_fraction
+            mask_fraction=args.mask_fraction,
+            n_to_freeze=args.n_to_freeze,
         )
 
 
