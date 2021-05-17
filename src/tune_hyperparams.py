@@ -185,7 +185,7 @@ def tune_node(
         train_node(
             experiment_name="%s_%d_%s" % (dataset_name, i, time_suffix),
             dataset=dataset,
-            batch_size=1024,
+            batch_size=256,
             device="cuda" if use_gpu else "cpu",
             report_frequency=100,
             epochs=float("inf"),
