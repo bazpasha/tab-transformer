@@ -1,13 +1,13 @@
 import argparse
 import time
 import torch
-from functools import partial
 import numpy as np
+import itertools
 
 from ax import ChoiceParameter, RangeParameter, ParameterType, SearchSpace, Models, OrderConstraint
 from ax.modelbridge.factory import get_sobol
 
-from trainer import train_catboost, train_fcn, train_tab_transformer
+from trainer import train_catboost, train_fcn, train_tab_transformer, train_node
 from data import get_dataset
 
 
@@ -165,6 +165,37 @@ def tune_tab_transformer(
         )
 
 
+def tune_node(
+    time_suffix,
+    dataset_name,
+    dataset,
+    use_gpu,
+    output_dir,
+    model_seed,
+    verbose,
+):
+    sweeps = [{
+        "num_layers": 1,
+        "total_tree_count": total_tree_count,
+        "tree_depth": tree_depth,
+        "tree_output_dim": tree_output_dim,
+    } for total_tree_count, tree_depth, tree_output_dim in itertools.product([1024, 2048], [6, 8], [2, 3])]
+
+    for i, sweep in enumerate(sweeps):
+        train_node(
+            experiment_name="%s_%d_%s" % (dataset_name, i, time_suffix),
+            dataset=dataset,
+            batch_size=1024,
+            device="cuda" if use_gpu else "cpu",
+            report_frequency=100,
+            epochs=float("inf"),
+            output_dir=output_dir,
+            model_seed=model_seed,
+            verbose=verbose,
+            **sweep,
+        )
+
+
 class HpWrapper:
     def __init__(self, training_function, monitor, dataset_name, time_suffix, **constant_params):
         self.i = 0
@@ -238,6 +269,16 @@ if __name__ == "__main__":
             params_seed=args.params_seed,
             verbose=args.verbose,
             skip_sweeps=args.skip_sweeps
+        )
+    elif args.model_name == "node":
+        tune_node(
+            time_suffix=time_suffix,
+            dataset_name=args.dataset,
+            dataset=dataset,
+            use_gpu=use_gpu,
+            output_dir=args.output_dir,
+            model_seed=args.model_seed,
+            verbose=args.verbose,
         )
     else:
         raise NotImplementedError

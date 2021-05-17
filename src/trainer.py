@@ -533,3 +533,86 @@ def train_fcn(
         shutil.move(trainer.experiment_path, output_dir)
 
     return metrics
+
+
+def train_node(
+    num_layers,
+    total_tree_count,
+    tree_depth,
+    tree_output_dim,
+    experiment_name,
+    dataset,
+    batch_size,
+    device,
+    report_frequency,
+    epochs=None,
+    output_dir=None,
+    model_seed=42,
+    verbose=True,
+):
+    torch.manual_seed(model_seed)
+    random.seed(model_seed)
+    np.random.seed(model_seed)
+
+    if dataset.dataset_task == "regression":
+        averaging = node.lib.Lambda(lambda x: x[..., 0].mean(dim=-1))
+    else:
+        averaging = node.lib.Lambda(lambda x: x[..., :dataset.n_classes].mean(dim=-2))
+
+    model = nn.Sequential(
+        node.lib.DenseBlock(
+            dataset.n_features,
+            total_tree_count,
+            num_layers=num_layers,
+            tree_dim=tree_output_dim,
+            depth=tree_depth,
+            flatten_output=False,
+            choice_function=node.lib.entmax15,
+            bin_function=node.lib.entmoid15
+        ),
+        averaging,
+    ).to(device)
+
+    # Data-aware initialization
+    with torch.no_grad():
+        x = model(torch.as_tensor(dataset.data.X_train[:2000], device=device))
+
+    trainer = Trainer(
+        model=model,
+        loss_function=F.mse_loss if dataset.dataset_task == "regression" else F.cross_entropy,
+        experiment_name=experiment_name,
+        warm_start=False,
+        Optimizer=QHAdam,
+        optimizer_params=get_default_optimizer_params(),
+        verbose=verbose,
+        n_last_checkpoints=5
+    )
+
+    metrics = train(
+        trainer=trainer,
+        data=dataset.data,
+        batch_size=batch_size,
+        device=device,
+        report_frequency=report_frequency,
+        dataset_task=dataset.dataset_task,
+        epochs=epochs or float("inf"),
+        n_classes=dataset.n_classes,
+        targets_std=dataset.target_std,
+        verbose=verbose,
+    )
+
+    params=dict(
+        num_layers=num_layers,
+        total_tree_count=total_tree_count,
+        tree_depth=tree_depth,
+        tree_output_dim=tree_output_dim,
+    )
+
+    params_path = os.path.join(trainer.experiment_path, "params.json")
+    with open(params_path, "w") as _out:
+        json.dump(params, _out)
+
+    if output_dir is not None:
+        shutil.move(trainer.experiment_path, output_dir)
+
+    return metrics
