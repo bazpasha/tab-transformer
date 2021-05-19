@@ -10,6 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from catboost import CatBoostRegressor, CatBoostClassifier
+from pytorch_tabnet.tab_model import TabNetRegressor, TabNetClassifier
 
 import node.lib
 from node.lib import check_numpy, to_one_hot, Lambda
@@ -616,3 +617,105 @@ def train_node(
         shutil.move(trainer.experiment_path, output_dir)
 
     return metrics
+
+
+def train_tabnet(
+    n_d,
+    n_steps,
+    gamma,
+    n_independent,
+    n_shared,
+    lambda_sparse,
+    learning_rate,
+    mask_type,
+    experiment_name,
+    dataset,
+    batch_size,
+    device,
+    epochs,
+    patience,
+    output_dir=None,
+    model_seed=42,
+    verbose=1,
+):
+    if dataset.dataset_task == "regression":
+        estimator = TabNetRegressor
+    else:
+        estimator = TabNetClassifier
+
+    model = estimator(
+        n_d=n_d,
+        n_a=n_d,
+        n_steps=n_steps,
+        gamma=gamma,
+        n_independent=n_independent,
+        n_shared=n_shared,
+        lambda_sparse=lambda_sparse,
+        mask_type=mask_type,
+        seed=model_seed,
+        optimizer_params={"lr": learning_rate},
+        verbose=verbose,
+        device_name=device,
+    )
+
+    if dataset.dataset_task == "regression":
+        y_transform = lambda y: y.reshape(-1, 1)
+    else:
+        y_transform = lambda y: y
+
+    data = dataset.data
+    model.fit(
+        X_train=data.X_train,
+        y_train=y_transform(data.y_train),
+        eval_set=[(data.X_valid, y_transform(data.y_valid))],
+        eval_metric=["mse" if dataset.dataset_task == "regression" else "accuracy"],
+        max_epochs=epochs,
+        patience=patience,
+        batch_size=batch_size,
+    )
+
+    results = {}
+    for name, (X, y) in {"test": (data.X_test, data.y_test), "valid": (data.X_valid, data.y_valid)}.items():
+        if dataset.dataset_task == "regression":
+            y_pred = model.predict(X).reshape(-1)
+            results[name] = {
+                "mse": np.mean((y - y_pred) ** 2) * dataset.target_std ** 2,
+                "mae": np.mean(np.abs(y - y_pred)) * dataset.target_std,
+            }
+        elif dataset.dataset_task == "classification":
+            y_pred = model.predict_proba(X)
+            one_hot = np.zeros((y.shape[0], dataset.n_classes))
+            one_hot[np.arange(one_hot.shape[0]), y] = 1
+            results[name] = {
+                "clf-error": np.mean(np.argmax(y_pred, -1) != y),
+                "logloss": log_loss(one_hot, y_pred)
+            }
+            if dataset.n_classes == 2:
+                results[name]["auc-roc"] = roc_auc_score(one_hot, y_pred)
+
+    if output_dir is not None:
+        out_path = os.path.join(output_dir, experiment_name)
+        os.mkdir(out_path)
+
+        eval_path = os.path.join(out_path, "eval.json")
+        with open(eval_path, "w") as _out:
+            json.dump(results, _out)
+
+        model_path = os.path.join(out_path, "model.tabnet")
+        model.save_model(model_path)
+
+        params_path = os.path.join(out_path, "params.json")
+        params = dict(
+            n_d=n_d,
+            n_steps=n_steps,
+            gamma=gamma,
+            n_independent=n_independent,
+            n_shared=n_shared,
+            lambda_sparse=lambda_sparse,
+            learning_rate=learning_rate,
+            mask_type=mask_type,
+        )
+        with open(params_path, "w") as _out:
+            json.dump(params, _out)
+
+    return results

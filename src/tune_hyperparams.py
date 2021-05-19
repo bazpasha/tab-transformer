@@ -7,7 +7,7 @@ import itertools
 from ax import ChoiceParameter, RangeParameter, ParameterType, SearchSpace, Models, OrderConstraint
 from ax.modelbridge.factory import get_sobol
 
-from trainer import train_catboost, train_fcn, train_tab_transformer, train_node
+from trainer import train_catboost, train_fcn, train_tab_transformer, train_node, train_tabnet
 from data import get_dataset
 
 
@@ -196,23 +196,49 @@ def tune_node(
         )
 
 
-class HpWrapper:
-    def __init__(self, training_function, monitor, dataset_name, time_suffix, **constant_params):
-        self.i = 0
-        self.training_function = training_function
-        self.monitor = monitor
-        self.constant_params = constant_params
-        self.dataset_name = dataset_name
-        self.time_suffix = time_suffix
+def tune_tabnet(
+    n_sweeps,
+    time_suffix,
+    dataset_name,
+    dataset,
+    use_gpu,
+    output_dir,
+    model_seed,
+    params_seed,
+    verbose,
+    skip_sweeps=None,
+):
+    search_space = SearchSpace(
+        parameters=[
+            ChoiceParameter(name="n_d", parameter_type=ParameterType.INT, values=[8, 16, 32, 64]),
+            RangeParameter(name="n_steps", parameter_type=ParameterType.INT, lower=3, upper=10),
+            RangeParameter(name="gamma", parameter_type=ParameterType.FLOAT, lower=1, upper=2),
+            RangeParameter(name="n_independent", parameter_type=ParameterType.INT, lower=1, upper=5),
+            RangeParameter(name="n_shared", parameter_type=ParameterType.INT, lower=1, upper=5),
+            RangeParameter(name="learning_rate", parameter_type=ParameterType.FLOAT, lower=1e-3, upper=2e-2, log_scale=True),
+            RangeParameter(name="lambda_sparse", parameter_type=ParameterType.FLOAT, lower=1e-5, upper=1e-3, log_scale=True),
+            ChoiceParameter(name="mask_type", parameter_type=ParameterType.STRING, values=["sparsemax", "entmax"]),
+        ]
+    )
 
-    def __call__(self, params):
-        result = self.training_function(
-            experiment_name="%s_%d_%s" % (self.dataset_name, self.i, self.time_suffix),
-            **self.constant_params,
-            **params
-        )["valid"][self.monitor]
-        self.i += 1
-        return result
+    sobol = get_sobol(search_space=search_space, seed=params_seed)
+    sweeps = sobol.gen(n=n_sweeps).arms
+    if skip_sweeps is not None:
+        sweeps = sweeps[skip_sweeps:]
+
+    for i, sweep in enumerate(sweeps):
+        train_tabnet(
+            experiment_name="%s_%d_%s" % (dataset_name, i, time_suffix),
+            dataset=dataset,
+            batch_size=1024,
+            device="gpu" if use_gpu else "cpu",
+            epochs=15,
+            patience=5,
+            output_dir=output_dir,
+            model_seed=42,
+            verbose=int(verbose),
+            **sweep.parameters
+        )
 
 
 if __name__ == "__main__":
@@ -279,6 +305,19 @@ if __name__ == "__main__":
             output_dir=args.output_dir,
             model_seed=args.model_seed,
             verbose=args.verbose,
+        )
+    elif args.model_name == "tabnet":
+        tune_tabnet(
+            n_sweeps=args.n_sweeps,
+            time_suffix=time_suffix,
+            dataset_name=args.dataset,
+            dataset=dataset,
+            use_gpu=use_gpu,
+            output_dir=args.output_dir,
+            model_seed=args.model_seed,
+            params_seed=args.params_seed,
+            verbose=args.verbose,
+            skip_sweeps=args.skip_sweeps
         )
     else:
         raise NotImplementedError
