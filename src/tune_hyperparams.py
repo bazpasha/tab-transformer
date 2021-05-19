@@ -231,7 +231,7 @@ def tune_tabnet(
             experiment_name="%s_%d_%s" % (dataset_name, i, time_suffix),
             dataset=dataset,
             batch_size=1024,
-            device="gpu" if use_gpu else "cpu",
+            device="cuda" if use_gpu else "cpu",
             epochs=15,
             patience=5,
             output_dir=output_dir,
