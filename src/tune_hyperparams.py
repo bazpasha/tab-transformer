@@ -176,16 +176,16 @@ def tune_node(
 ):
     sweeps = [{
         "num_layers": 1,
-        "total_tree_count": total_tree_count,
-        "tree_depth": tree_depth,
-        "tree_output_dim": tree_output_dim,
-    } for total_tree_count, tree_depth, tree_output_dim in itertools.product([1024, 2048], [6, 8], [2, 3])]
+        "total_tree_count": 1024,
+        "tree_depth": 6,
+        "tree_output_dim": 2,
+    }]
 
     for i, sweep in enumerate(sweeps):
         train_node(
             experiment_name="%s_%d_%s" % (dataset_name, i, time_suffix),
             dataset=dataset,
-            batch_size=64,
+            batch_size=256,
             device="cuda" if use_gpu else "cpu",
             report_frequency=100,
             epochs=float("inf"),
