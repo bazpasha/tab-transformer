@@ -219,7 +219,7 @@ class TabTransformer(nn.Module):
 
         self._initialize()
 
-    def forward(self, x, pretrain_mask=None):
+    def forward(self, x, pretrain_mask=None, attn_weights=False):
         n = x.size(0)
         x = x.unsqueeze(-1) * self.linear_embeddings + self.const_embeddings.expand(n, -1, -1)
 
@@ -227,7 +227,10 @@ class TabTransformer(nn.Module):
             assert pretrain_mask is not None
             x = (1 - pretrain_mask) * x + pretrain_mask * self.unk_embedding
 
-        x = self.tokenizer(x)
+        if attn_weights:
+            x, weights = self.tokenizer(x, attn_weights=True)
+        else:
+            x = self.tokenizer(x)
         x = self.transformer(x)
         x = self.norm(x)
 
@@ -237,7 +240,11 @@ class TabTransformer(nn.Module):
             return self.pretrain_output(x).squeeze(-1)
 
         x = x.mean(dim=1)
-        return self.output(x).squeeze(1)
+        x = self.output(x).squeeze(1)
+
+        if attn_weights:
+            return x, weights
+        return x
 
     def _initialize(self):
         normal_(self.linear_embeddings, std=0.1)
