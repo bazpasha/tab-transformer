@@ -94,7 +94,7 @@ class Attention(nn.Module):
             result = self.output_linear(result)
 
         if attn_weights:
-            weights_cpu = weights.detach().cpu().numpy()
+            weights_cpu = weights.detach().cpu()
             if norm_attn_weights:
                 values_norm = torch.norm(values.detach().cpu(), dim=-1).unsqueeze(1)
                 weights_cpu = weights_cpu * values_norm
