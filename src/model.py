@@ -71,7 +71,7 @@ class Attention(nn.Module):
 
         self._initialize()
 
-    def forward(self, x, mask=None, attn_weights=False):
+    def forward(self, x, mask=None, attn_weights=False, norm_attn_weights=True):
         # x.shape = [batch, length, token_dim]
         batch_size = x.shape[0]
 
@@ -94,7 +94,11 @@ class Attention(nn.Module):
             result = self.output_linear(result)
 
         if attn_weights:
-            return result, weights
+            weights_cpu = weights.detach().cpu().numpy()
+            if norm_attn_weights:
+                values_norm = torch.norm(values.detach().cpu(), dim=-1).unsqueeze(1)
+                weights_cpu = weights_cpu * values_norm
+            return result, weights_cpu
         return result
 
     def _initialize(self):
@@ -181,6 +185,7 @@ class TabTransformer(nn.Module):
 
         attention_kwargs = attention_kwargs or {}
         transformer_kwargs = transformer_kwargs or {}
+        agg_attention_kwargs = agg_attention_kwargs or {}
 
         self.n_tokens = n_tokens
         self.linear_embeddings = nn.Parameter(data=torch.empty(1, n_features, d_model))
@@ -219,7 +224,7 @@ class TabTransformer(nn.Module):
 
         self._initialize()
 
-    def forward(self, x, pretrain_mask=None, attn_weights=False):
+    def forward(self, x, pretrain_mask=None, attn_weights=False, norm_attn_weights=False):
         n = x.size(0)
         x = x.unsqueeze(-1) * self.linear_embeddings + self.const_embeddings.expand(n, -1, -1)
 
@@ -228,7 +233,7 @@ class TabTransformer(nn.Module):
             x = (1 - pretrain_mask) * x + pretrain_mask * self.unk_embedding
 
         if attn_weights:
-            x, weights = self.tokenizer(x, attn_weights=True)
+            x, weights = self.tokenizer(x, attn_weights=True, norm_attn_weights=norm_attn_weights)
         else:
             x = self.tokenizer(x)
         x = self.transformer(x)
